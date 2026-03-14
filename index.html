@@ -51,9 +51,7 @@
       background: #fff;
     }
 
-    .input-row input:focus {
-      border-color: #6c63ff;
-    }
+    .input-row input:focus { border-color: #6c63ff; }
 
     .input-row button {
       padding: 12px 20px;
@@ -159,15 +157,7 @@
       word-break: break-all;
     }
 
-    .todo-text[contenteditable="true"] {
-      outline: none;
-      border-bottom: 1px dashed #6c63ff;
-    }
-
-    .todo-actions {
-      display: flex;
-      gap: 4px;
-    }
+    .todo-actions { display: flex; gap: 4px; }
 
     .btn-icon {
       background: none;
@@ -210,6 +200,13 @@
     }
 
     #clearDone:hover { text-decoration: underline; }
+
+    .loading {
+      text-align: center;
+      color: #aaa;
+      font-size: 14px;
+      padding: 40px 0;
+    }
   </style>
 </head>
 <body>
@@ -233,15 +230,28 @@
     <button onclick="setFilter('done', this)">완료</button>
   </div>
 
-  <div class="todo-list" id="todoList"></div>
+  <div class="todo-list" id="todoList"><div class="loading">불러오는 중...</div></div>
 </div>
 
-<script>
-  let todos = JSON.parse(localStorage.getItem('todos') || '[]');
+<script type="module">
+  import { createClient } from 'https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/+esm';
+
+  const SUPABASE_URL = 'https://uyzjzgzowdwztfxhlemt.supabase.co';
+  const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InV5emp6Z3pvd2R3enRmeGhsZW10Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzM0NTIzODAsImV4cCI6MjA4OTAyODM4MH0.hRBY2ebBrp1KuV9FVvwT5Bq2sYgmrWNRokRCg-iYCAU';
+
+  const supabase = createClient(SUPABASE_URL, SUPABASE_KEY);
+
+  let todos = [];
   let filter = 'all';
 
-  function save() {
-    localStorage.setItem('todos', JSON.stringify(todos));
+  async function loadTodos() {
+    const { data, error } = await supabase
+      .from('todos')
+      .select('*')
+      .order('created_at', { ascending: false });
+    if (error) { console.error(error); return; }
+    todos = data;
+    render();
   }
 
   function render() {
@@ -262,11 +272,11 @@
 
     list.innerHTML = filtered.map(t => `
       <div class="todo-item ${t.done ? 'done' : ''}" data-id="${t.id}">
-        <div class="todo-check" onclick="toggle(${t.id})"></div>
+        <div class="todo-check" onclick="window.toggle('${t.id}')"></div>
         <span class="todo-text">${escHtml(t.text)}</span>
         <div class="todo-actions">
-          <button class="btn-icon" title="수정" onclick="editTodo(${t.id})">✏️</button>
-          <button class="btn-icon" title="삭제" onclick="deleteTodo(${t.id})">🗑️</button>
+          <button class="btn-icon" title="수정" onclick="window.editTodo('${t.id}')">✏️</button>
+          <button class="btn-icon" title="삭제" onclick="window.deleteTodo('${t.id}')">🗑️</button>
         </div>
       </div>
     `).join('');
@@ -276,61 +286,71 @@
     return str.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
   }
 
-  function addTodo() {
+  window.addTodo = async function() {
     const input = document.getElementById('todoInput');
     const text = input.value.trim();
     if (!text) return;
-    todos.unshift({ id: Date.now(), text, done: false });
     input.value = '';
-    save();
+    const { data, error } = await supabase.from('todos').insert({ text, done: false }).select().single();
+    if (error) { console.error(error); return; }
+    todos.unshift(data);
     render();
-  }
+  };
 
-  function toggle(id) {
+  window.toggle = async function(id) {
     const t = todos.find(t => t.id === id);
-    if (t) { t.done = !t.done; save(); render(); }
-  }
+    if (!t) return;
+    const { error } = await supabase.from('todos').update({ done: !t.done }).eq('id', id);
+    if (error) { console.error(error); return; }
+    t.done = !t.done;
+    render();
+  };
 
-  function deleteTodo(id) {
+  window.deleteTodo = async function(id) {
+    const { error } = await supabase.from('todos').delete().eq('id', id);
+    if (error) { console.error(error); return; }
     todos = todos.filter(t => t.id !== id);
-    save(); render();
-  }
+    render();
+  };
 
-  function editTodo(id) {
+  window.editTodo = async function(id) {
     const t = todos.find(t => t.id === id);
     if (!t) return;
     const newText = prompt('수정할 내용을 입력하세요:', t.text);
     if (newText !== null && newText.trim()) {
+      const { error } = await supabase.from('todos').update({ text: newText.trim() }).eq('id', id);
+      if (error) { console.error(error); return; }
       t.text = newText.trim();
-      save(); render();
+      render();
     }
-  }
+  };
 
-  function clearDone() {
+  window.clearDone = async function() {
     if (!todos.some(t => t.done)) return;
     if (confirm('완료된 항목을 모두 삭제할까요?')) {
+      const { error } = await supabase.from('todos').delete().eq('done', true);
+      if (error) { console.error(error); return; }
       todos = todos.filter(t => !t.done);
-      save(); render();
+      render();
     }
-  }
+  };
 
-  function setFilter(f, btn) {
+  window.setFilter = function(f, btn) {
     filter = f;
     document.querySelectorAll('.filters button').forEach(b => b.classList.remove('active'));
     btn.classList.add('active');
     render();
-  }
+  };
 
   document.getElementById('todoInput').addEventListener('keydown', e => {
-    if (e.key === 'Enter') addTodo();
+    if (e.key === 'Enter') window.addTodo();
   });
 
-  // 날짜 표시
   const d = new Date();
   document.getElementById('dateLabel').textContent =
     `${d.getFullYear()}년 ${d.getMonth()+1}월 ${d.getDate()}일`;
 
-  render();
+  loadTodos();
 </script>
 </body>
 </html>
